@@ -1,0 +1,437 @@
+---
+title: "How Tired Do Starting Pitchers Get During a Game?"
+author: "Jake Fenley, Micah Jona"
+date: "December 10, 2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(tidyverse)
+library(data.table)
+library(sqldf)
+library(knitr)
+library(kableExtra)
+library(lme4)
+library(stargazer)
+```
+
+
+```{r data_downloading, eval = F}
+#Following code downloads all pitch values from baseballsavant by accessing the corresponding .csv pitch file for each day in the season. All files are then combined into a general file. Downloads approximately 8GB of data.
+
+#Create and set pitch file destinations
+dir.create("pitches")
+setwd("/Users/Jake Fenley/Documents/pitches")
+
+#Possible year/month/day values
+years <- c(2018:2007)
+months <- c(11:3)
+days <- c(31:1)
+
+#Create each possible date combination
+dates = character(length(years) * length(months) * length(days))
+m = 1
+for (i in years){
+  for (j in months){
+    for (k in days){
+      dates[m] =   paste(i, j, k, sep ="-")
+      m = m + 1
+    }
+  }
+}
+
+#Download pitch file for each date created.
+downloaded = 0
+for (date in dates){
+  print(date)
+  url.dated <- paste(c("https://baseballsavant.mlb.com/statcast_search/csv?all=true&hfPT=&hfAB=&hfBBT=&hfPR=&hfZ=&stadium=&hfBBL=&hfNewZones=&hfGT=R%7C&hfC=&hfSea=2019%7C2018%7C2017%7C2016%7C2015%7C2014%7C2013%7C2012%7C2011%7C2010%7C2009%7C2008%7C&hfSit=&player_type=pitcher&hfOuts=&opponent=&pitcher_throws=&batter_stands=&hfSA=&game_date_gt=", date,  "&game_date_lt=" , date, "&hfInfield=&team=&position=&hfOutfield=&hfRO=&home_road=&hfFlag=&hfPull=&metric_1=&hfInn=&min_pitches=0&min_results=0&group_by=name&sort_col=pitches&player_event_sort=h_launch_speed&sort_order=desc&min_pas=0&type=details&"), sep = "", collapse = "")
+  destfile.dated <- paste(c("/Users/Jake Fenley/Documents/pitches/p", date, ".csv"), sep = "", collapse = "")
+  print(destfile.dated)
+  try(
+    download.file(url.dated, destfile.dated, quiet = TRUE)
+  )
+  downloaded = downloaded + 1
+  Sys.sleep(5)
+}
+  
+#General database
+all.pitches <- matrix()
+
+#General database
+game.pitches <- data.frame()
+
+#Add each indiviudal file to database
+files <- list.files("/Users/Jake Fenley/Documents/pitches")
+for (file in files){
+  try(
+    game.pitches <- read.csv(file, header = TRUE)
+  )
+  game.pitches <- game.pitches[nrow(game.pitches):1,]
+  fwrite(game.pitches, file = "/Users/Jake Fenley/Documents/pitches-statcast/general.csv", append = TRUE)
+  print(file)
+}
+
+```
+
+```{r data_reading, eval= F}
+setwd("C:/Users/Jake Fenley/Documents")
+
+#Read file containing all pitch information
+everything <- fread("/Users/Jake Fenley/Documents/pitches-statcast/general.csv") #Load data
+#Read file containing relevant pitcher names
+pitcher_names <- fread("C:/Users/Jake Fenley/Downloads/pitcher_names.csv", header = F, sep = NULL)
+
+#Subset by relevant pitcher, 2019 season and only relevant fields
+pitch_values <- subset(everything, everything$game_year == 2019) #Get 2019 season
+pitch_values <- dplyr::select(as_tibble(pitch_values), c(1, 2, 3, 6, 8, 27, 36)) 
+
+# Column values
+# 1 Type of pitch
+# 2 Game date
+# 3 Release speed (pitch)
+# 6 Pitcher name
+# 8 Pitcher ID
+# 27 Game year (season)
+# 36 Inning
+
+pitch_values$pitch_number = 0 #Add pitch number column
+pitch_values$inning_position = "" #Add inning first/last indicator  
+pitch_values$game_position = "" #Add game first/last indicator
+
+```
+
+```{r pitch_numbering, eval = F}
+#This code chunk uses multiple for loops to assign factors to each pitch based on their position within the inning and within the game. Also labels them as the number of pitch they are for the given pitcher in the given game.
+
+########################################## PITCH NUMBERING #####################################
+helper = data.frame(game_date = character(0), pitcher = numeric(0), count = numeric(0), stringsAsFactors=FALSE)
+
+system.time(
+for (i in 1:nrow(pitch_values)){
+  num = helper$count[pitch_values$game_date[i] == helper$game_date & pitch_values$pitcher[i] == helper$pitcher]
+  if (is.null(num) | length(num) == 0){
+    helper[nrow(helper)+1,] = list(pitch_values$game_date[i], pitch_values$pitcher[i], as.numeric(1))
+    helper$count[pitch_values$game_date[i] == helper$game_date & pitch_values$pitcher[i] == helper$pitcher] = 1
+    pitch_values$pitch_number[i] = 1
+  } else {
+        helper$count[pitch_values$game_date[i] == helper$game_date & pitch_values$pitcher[i] == helper$pitcher] = helper$count[pitch_values$game_date[i] == helper$game_date & pitch_values$pitcher[i] == helper$pitcher] + 1
+        pitch_values$pitch_number[i] = num + 1
+  }
+  
+  if (nrow(helper) >= 200){
+    helper = helper[-c(1:100),]
+  }
+})
+
+########################################### INNING NUMBERING ####################################
+starters <- subset(pitch_values, pitch_values$player_name %in% pitcher_names$V1)
+
+helper = data.frame(game_date = character(0), 
+                    pitcher = numeric(0), 
+                    inning = numeric(0), 
+                    count = numeric(0), stringsAsFactors=FALSE)
+
+system.time(
+for (i in 1:nrow(starters)){
+  num = helper$count[starters$game_date[i] == helper$game_date & starters$pitcher[i] == helper$pitcher & starters$inning[i] == helper$inning]
+  if (is.null(num) | length(num) == 0){
+    helper[nrow(helper)+1,] = list(starters$game_date[i], starters$pitcher[i], starters$inning[i], as.numeric(1))
+    helper$count[starters$game_date[i] == helper$game_date & starters$pitcher[i] == helper$pitcher & starters$inning[i] == helper$inning] = 1
+    starters$inning_position[i] = "F"
+  } else if (num <= 2){
+    helper$count[starters$game_date[i] == helper$game_date & starters$pitcher[i] == helper$pitcher & starters$inning[i] == helper$inning] = num + 1
+    starters$inning_position[i] = "F"
+  } else {
+        helper$count[starters$game_date[i] == helper$game_date & starters$pitcher[i] == helper$pitcher & starters$inning[i] == helper$inning] = num + 1
+  }
+})
+
+helper = data.frame(game_date = character(0), 
+                    pitcher = numeric(0), 
+                    inning = numeric(0), 
+                    count = numeric(0), stringsAsFactors=FALSE)
+
+system.time(
+for (i in nrow(starters):1){
+  num = helper$count[starters$game_date[i] == helper$game_date & starters$pitcher[i] == helper$pitcher & starters$inning[i] == helper$inning]
+  if (is.null(num) | length(num) == 0){
+    helper[nrow(helper)+1,] = list(starters$game_date[i], starters$pitcher[i], starters$inning[i], as.numeric(1))
+    helper$count[starters$game_date[i] == helper$game_date & starters$pitcher[i] == helper$pitcher & starters$inning[i] == helper$inning] = 1
+    starters$inning_position[i] = "TL"
+  } else if (num <= 3){
+    helper$count[starters$game_date[i] == helper$game_date & starters$pitcher[i] == helper$pitcher & starters$inning[i] == helper$inning] = num + 1
+    starters$inning_position[i] = "L"
+  } else {
+        helper$count[starters$game_date[i] == helper$game_date & starters$pitcher[i] == helper$pitcher & starters$inning[i] == helper$inning] = num + 1
+  }
+})
+
+########################################### GAME NUMBERING ####################################
+helper = data.frame(game_date = character(0), pitcher = numeric(0), count = numeric(0), stringsAsFactors=FALSE)
+
+system.time(
+for (i in 1:nrow(starters)){
+  num = helper$count[starters$game_date[i] == helper$game_date & starters$pitcher[i] == helper$pitcher]
+  if (is.null(num) | length(num) == 0){
+    helper[nrow(helper)+1,] = list(starters$game_date[i], starters$pitcher[i], as.numeric(1))
+    helper$count[starters$game_date[i] == helper$game_date & starters$pitcher[i] == helper$pitcher] = 1
+    starters$game_position[i] = "F"
+  } else if (num <= 9){
+    helper$count[starters$game_date[i] == helper$game_date & starters$pitcher[i] == helper$pitcher] = num + 1
+    starters$game_position[i] = "F"
+  } else {
+        helper$count[starters$game_date[i] == helper$game_date & starters$pitcher[i] == helper$pitcher] = helper$count[starters$game_date[i] == helper$game_date & starters$pitcher[i] == helper$pitcher] + 1
+  }
+})
+
+helper = data.frame(game_date = character(0), pitcher = numeric(0), count = numeric(0), stringsAsFactors=FALSE)
+
+system.time(
+for (i in nrow(starters):1){
+  num = helper$count[starters$game_date[i] == helper$game_date & starters$pitcher[i] == helper$pitcher]
+  if (is.null(num) | length(num) == 0){
+    helper[nrow(helper)+1,] = list(starters$game_date[i], starters$pitcher[i], as.numeric(1))
+    helper$count[starters$game_date[i] == helper$game_date & starters$pitcher[i] == helper$pitcher] = 1
+    starters$game_position[i] = "L"
+  } else if (num <= 9){
+    helper$count[starters$game_date[i] == helper$game_date & starters$pitcher[i] == helper$pitcher] = num + 1
+    starters$game_position[i] = "L"
+  } else {
+        helper$count[starters$game_date[i] == helper$game_date & starters$pitcher[i] == helper$pitcher] = helper$count[starters$game_date[i] == helper$game_date & starters$pitcher[i] == helper$pitcher] + 1
+  }
+})
+
+fwrite(starters, "starters.csv")
+```
+
+
+###Introduction
+When professional baseball began in the later part of the 19th century there was only one pitcher per game per team. That pitcher would pitch the entire game, no matter how effective, or ineffective, they were. Gradually, baseball started to use more pitchers per game and by 1960 the average number of pitchers per game per team was around 2.5. That held steady until 1980, and since then that number has risen dramatically to the 4.5 pitchers per game per team that we see today.^[Pitchers per game seasonal data from: https://baseballwithr.wordpress.com/2019/01/28/historical-look-at-pitcher-usage/] That increase is because teams have started to limit how many pitches the starting pitcher throws during a game. One of the main reasons that this happens is that pitchers start to fatigue over the course of the game. This causes a decline in a pitcher's performance. In 1999, Dr. James Andrews, the sports leading orthopedic surgeon, wrote a paper suggesting 100 pitches as the limit for a pitcher in one game.^[https://www.ncbi.nlm.nih.gov/pubmed/20086726] Since then that number has stuck around as a *de facto* pitch limit. In 1998 there were 272 games where a starter threw more than 125 pitches in a game^[https://www.foxsports.com/mlb/story/dodgers-no-hitter-scott-stripling-sf-giants-pitch-limit-rookie-100-pitches-reason-why-040916], in 2019 there were just 4 such games.^[https://www.baseball-reference.com/] The fatigue experienced by starting pitchers throughout games is of great interest in understanding why this 100-pitch limit exists.
+
+For our research purposes, fatigue was measured through pitching speed. Pitch speed^[Pitch Speed is officially known as Pitch Velocity since the direction of the pitch is provided. Throughout this paper, both terms are used interchangeably.] is measured through Major League Baseball Advanced Media by a radar and optical camera system called Trackman. Trackman defines pitch velocity as the release speed of a pitch, in MPH, at the moment it leaves the pitcher's hand. Our analysis shows that throwing repeatedly causes the pitcher's pitch speed to diminish, however pauses in game (inning breaks) allow the pitcher to regain their speed.
+
+
+###Methods
+
+Two sources of data were used for this project. The main source was baseballsavant.com, which provides pitch by pitch data from every MLB game since the 2015 season. Every pitch has over fifty different types of variables that uniquely describe the pitch. Basic information such as the date, the teams playing, and the players on the field are included as well as more advanced information like pitch speed, spin rate, ball movement, etc.^[A glossary for all terms is provided by the MLB at https://baseballsavant.mlb.com/csv-docs] A custom R script was used to download and combine every pitch recorded by baseballsavant from the 2019 season into a single database. 
+
+Initially, the entirety of pitches were to be used. However, as this became infeasible due to bias from different types of pitchers, a subset of starting pitchers was selected. The baseball statistics and analysis website fangraphs.com was used to obtain a substantive sample size of starting pitchers from the 2019 season. A query for all starting pitchers in the 2019 season with more than 100 pitched innings was used. The 100 inning minimum requirement was implemented to ensure a large enough sample size in terms of innings for each pitcher. A total of 113 starting pitchers satisfied this requirement. The baseballsavant pitch data was then limited to include only data for these pitchers. The reason the sample was limited to only starting pitchers is because they throw significantly more pitches per game than a relief pitcher. A relief pitcher is a player that comes in after the starting pitcher. Those relief pitchers only throw about twenty pitches compared to a starting pitcher who throws upwards of eighty. Relief pitchers are expected to come into a game and throw as hard as they can for one or two innings, without regard for trying to save any energy for later in the game. 
+
+Once the sample was limited to starting pitchers, the average speed of each pitch for the game was computed, from the first throughout the hundreth pitch. The limit of 100 pitches reflects the *de facto* 100 pitch limit, with the number of pitches above that threshold being very scarce.
+
+A linear model was used to show the effect of velocity as the number of pitches in a game increases. Despite the data not showing a clear linear trend, a simple linear model is still useful in providing insight on whether an overall increase or decrease is present in data. Although more flexible methods would allow a better fit of the data, they do not provide a simple measure of change in the same manner that the simple linear models slope coefficient does. The linear model is also easier to interpret than a more complex, flexible model. 
+
+In order to support the theory of fatigue, major breaks in the game had to be accounted for. It was theorized that inning breaks within the game could allow a pitcher to regain their lost speed. To account for this inning break, pitches were categorized if they were the first three or last three of an inning. The last pitches of the inning exclude the last pitch itself, and in reality are the 4th-to-last pitch to the 2nd-to-last pitch. The reason that the actual last pitch of the inning was not included is due to the outcome it must have had for it to have become the last pitch of the inning. This implication states that an eventful pitch, whether the outcome be beneficial or harmful for the pitcher, has to have happened for it to end the inning. Thus, these last pitches are not representative of regular pitches.
+
+The software used for this analysis was R v3.5.1 through RStudio. The libraries `tidyverse`, `data.table`, and `sqldf` were used for data cleaning due to their performance with large datasets. `lme4` was used for mixed effects regressions. `Knitr`, `stargaze` and `kable` were used to produce enhanced table visualizations.
+
+
+###Results
+
+The average pitch speed for each pitch in the game was computed. The results can be seen in the following graph.
+
+
+```{r all_pitches, warning = F, fig.align="center", fig.height=3.5, fig.cap="Pitch Velocity for the First Hundred Pitches of all 2019 Games", fig.pos="H"}
+
+starters <- fread("starters.csv")
+pitch_values <- fread("pitch_values.csv")
+
+#Data cleaning
+starters$release_speed[starters$release_speed == "null"] = NA
+starters$release_speed = as.numeric(starters$release_speed)
+starters$pitch_type[starters$pitch_type == "null"] = NA
+starters$pitch_type[starters$pitch_type == "NA"] = NA
+starters$pitch_type[starters$pitch_type == ""] = NA
+
+pitch_values$release_speed[pitch_values$release_speed == "null"] = NA
+pitch_values$release_speed = as.numeric(pitch_values$release_speed)
+pitch_values$pitch_type[pitch_values$pitch_type == "null"] = NA
+pitch_values$pitch_type[pitch_values$pitch_type == "NA"] = NA
+pitch_values$pitch_type[pitch_values$pitch_type == ""] = NA
+
+pitch_order_counts_all = data.frame(number = c(1:100),
+                                mean_v = numeric(100),
+                                counts = numeric(100),
+                                v.min = numeric(100), 
+                                v.max = numeric(100))
+
+pitch_order_counts = data.frame(number = c(1:100),
+                                mean_v = numeric(100),
+                                counts = numeric(100),
+                                v.min = numeric(100), 
+                                v.max = numeric(100))
+
+for (i in 1:100){
+  pitch_order_counts$mean_v[i] = mean(starters$release_speed[starters$pitch_number == i], na.rm = TRUE)
+  pitch_order_counts$counts[i] = length(starters$release_speed[starters$pitch_number == i])
+  pitch_order_counts$v.min[i] = pitch_order_counts$mean_v[i] - sd(starters$release_speed[starters$pitch_number == i], na.rm = TRUE) * 1.96
+  pitch_order_counts$v.max[i] = pitch_order_counts$mean_v[i] + sd(starters$release_speed[starters$pitch_number == i], na.rm = TRUE) * 1.96
+}
+
+for (i in 1:100){
+  pitch_order_counts_all$mean_v[i] = mean(pitch_values$release_speed[pitch_values$pitch_number == i], na.rm = TRUE)
+  pitch_order_counts_all$counts[i] = length(pitch_values$release_speed[pitch_values$pitch_number == i])
+  pitch_order_counts_all$v.min[i] = pitch_order_counts_all$mean_v[i] - sd(pitch_values$release_speed[pitch_values$pitch_number == i], na.rm = TRUE) * 1.96
+  pitch_order_counts_all$v.max[i] = pitch_order_counts_all$mean_v[i] + sd(pitch_values$release_speed[pitch_values$pitch_number == i], na.rm = TRUE) * 1.96
+}
+pitch_order_counts_all$prop = pitch_order_counts_all$counts / max(pitch_order_counts_all$counts) * 100
+
+
+
+########################################### INITIAL PLOTS ###################################
+#Plot 1: ALL pitch numbers average speed
+par(mar=c(5, 4, 4, 6) + 0.1)
+plot(pitch_order_counts_all$number, pitch_order_counts_all$mean_v, xlab = "Number of Pitches Thrown By Pitcher", ylab = "Average Pitch Speed (mph)")
+par(new = TRUE)
+plot(pitch_order_counts_all$number, pitch_order_counts_all$pro, type = 'l', ltype = "dashed", ylim = c(0, 100), axes = FALSE, col = alpha("red",0.4), xlab = "", ylab = "")
+axis(4, ylim = c(0, 100), las = 1, col = alpha("red", 0.6), col.axis= alpha("red", 0.8))
+mtext("% of Times that Many Pitches Thrown ", side = 4, line = 2.5, col = alpha("red", 0.9))
+
+```
+
+As theorized, due to the effects of repeated pitches, the pitch speed does reduce as more pitches are thrown. However, it is clear that there are two main trends in the change in pitch velocity that can be observed in the graph. From the initial pitch until roughly the 40th pitch of the game, there is a rather constant decrease in pitch velocity, which disappears from the 40th pitch onward. These results seemed quite unexpected, as the fatigue the pitchers experience should not simply disappear after a certain amount of pitches, and should instead continue throughout their entire time in the game. 
+
+After thoroughly studying this pattern, it was found that the results shown were the consequence of using data of both starting and relief pitchers. Relief pitchers, who only throw around 20 pitches a game, were being included in the area where a strong pitch decrease was observed. Meanwhile, starting pitchers throw an average of 89.9 pitches a game. Thus, in the area of the graph beyond about 40 pitches, where pitch speed no longer seems to be decreasing, only starting pitchers tended to remain. The unexpected behavior shown in this figure prompted our realization that it was necessary to limit our analysis to include only starters. 
+
+Another issue which can be observed is the contrast in speed velocity from the first and second pitches. No change of such magnitude can be observed elsewhere. The reason for the first-pitch having such a high speed was found to result from fastballs being thrown 82.5% of the time (there isn't consensus on why this occurs, but a well-known theory is that batters do not frequently swing at the first pitch of a game^['Why Almost every MLB game begins with a fastball' https://www.espn.com/mlb/story/_/id/24577187/why-almost-every-mlb-game-begins-fastball]). For all other pitches, fastballs only occurred 48% of the time. Due to this occurrence, it seemed necessary to separate pitches by their pitch type, as this shows pitch type is not independent of the pitch number. 
+
+Consequently, the data was divided based on pitch type (four-seam fastball, two-seam fastball, cutter, curveball) and limited exclusively to starters. Four-seam fastball, two-seam fastball, cutter, and curveball were chosen as the four pitch types to be used because of the sample size they provided for the analysis and their relevance to baseball. The previous analysis was then repeated for each pitch type, only including starter pitchers. In order to determine whether a decrease in pitch velocity was evident, a linear model was fit to each. 
+
+
+```{r bt_pitch_type, fig.cap="Pitch Velocity for each Pitch of all 2019 games. Breakdown by Pitch Type", fig.pos="H"}
+starters_filtered <- starters
+starters_filtered$pitch_type[starters_filtered$pitch_type == "SI" | starters_filtered$pitch_type == "FT"] = "2sf"
+starters_filtered$pitch_type[starters_filtered$pitch_type == "FF"] = "4sf"
+starters_filtered$pitch_type[starters_filtered$pitch_type == "FC"] = "fc"
+starters_filtered$pitch_type[starters_filtered$pitch_type == "CU" | starters_filtered$pitch_type == "KC"] = "cb"
+
+pitcher_average_by_type <- sqldf("SELECT pitch_type, pitch_number, pitcher, AVG(release_speed) AS release_speed FROM starters_filtered WHERE pitch_type<>'' GROUP BY pitch_type, pitcher, pitch_number")
+average_by_type <- sqldf("SELECT pitch_type, pitch_number, AVG(release_speed) AS release_speed FROM pitcher_average_by_type GROUP BY pitch_type, pitch_number")
+
+sub_2sf <- subset(average_by_type, average_by_type$pitch_type == "2sf")
+sub_2sf <- subset(sub_2sf, sub_2sf$pitch_number < 101)
+sub_4sf <- subset(average_by_type, average_by_type$pitch_type == "4sf")
+sub_4sf <- subset(sub_4sf, sub_4sf$pitch_number < 101)
+sub_fc <- subset(average_by_type, average_by_type$pitch_type == "fc")
+sub_fc <- subset(sub_fc, sub_fc$pitch_number < 101)
+sub_cb <- subset(average_by_type, average_by_type$pitch_type == "cb")
+sub_cb <- subset(sub_cb, sub_cb$pitch_number < 101)
+
+par(oma=c(3,3,3,3))  
+layout(matrix(c(1, 2,3, 4), nrow = 2, byrow = TRUE))
+par(mar = c(2,2,2,2))
+plot(sub_2sf$pitch_number, sub_2sf$release_speed, xlab = "Pitch Number", ylab = "Avg. Pitch Speed (mph)", main = "2-Seam Fastball", cex = 0.7)
+lm_2sf <- lm(release_speed ~ pitch_number, data = sub_2sf)
+abline(lm_2sf, col = "red")
+plot(sub_4sf$pitch_number, sub_4sf$release_speed, xlab = "Pitch Number", ylab = "Avg. Pitch Speed (mph)", main = "4-Seam Fastball", cex = 0.7)
+lm_4sf <- lm(release_speed ~ pitch_number, data = sub_4sf)
+abline(lm_4sf, col = "red")
+plot(sub_fc$pitch_number, sub_fc$release_speed, xlab = "Pitch Number", ylab = "Avg. Pitch Speed (mph)", main = "Cutter", cex = 0.7)
+lm_fc <- lm(release_speed ~ pitch_number, data = sub_fc)
+abline(lm_fc, col = "red")
+plot(sub_cb$pitch_number, sub_cb$release_speed, xlab = "Pitch Number", ylab = "Avg. Pitch Speed (mph)", main = "Curveball", cex = 0.7)
+lm_cb <- lm(release_speed ~ pitch_number, data = sub_cb)
+abline(lm_cb, col = "red")
+mtext("Pitch Number", side=1, line=1, cex=1, col="black", outer=TRUE)  
+mtext("Pitch Velocity (mph)", side=2, line=1, cex=1, col="black", outer=TRUE)  
+```
+
+All four graphs demonstrate a decrease in average pitch velocity. The slope coefficients for all four are negative and significant, and can be seen in the following summary table. (Raw R output of the regression tables can be found in the Appendix.)
+
+\newpage
+
+```{r summary_table, results = 'asis', fig.pos="H", fig.cap="Regression Results for Pitch Type"}
+
+reg_summ <- stargazer(lm_2sf, lm_4sf, lm_fc, lm_cb, 
+                      title = "Linear Models of Pitch Velocity Change", 
+                      type = "latex",
+                      column.labels = c("2-Seam FB", "4-Seam FB", "Cutter", "Curveball"),
+                      dep.var.labels = "Pitch Velocity",
+                      covariate.labels = c("Pitch Number", "Intercept"),
+                      header = FALSE)
+
+```
+
+Surprisingly, the presence of the drastic decrease in pitch velocity between the first and following pitches not only disappeared, but instead was reversed. Each pitch type shows an increase in velocity for the first couple pitches. It is believed that this pattern is the result of pitchers taking a while to warm up. 
+
+Given our hypothesis that pitch speed decreases as the number of pitches (and fatigue) increases, then it might follow that breaks in innings would allow pitchers to rest and partially recover from fatigue. A model that displays the change in pitch velocity throughout the game as well as the position within the beginning/end of an inning was created. Since the sample includes all pitches in the 2019 season, each pitcher has hundreds of observations. Due to this lack of independence in samples, a multiple linear regression model is not appropriate. Instead, a mixed effect model is used, by incorporating the pitcher as a random effect. All other independent variables are kept as fixed variables. (Raw R output of the regression tables can be found in the Appendix.)
+
+
+```{r mixed_model, results = 'asis', fig.show="hold", fig.pos="H", fig.cap="Mixed Model Effect"}
+valid_pitches <- subset(starters_filtered, 
+                        starters_filtered$inning_position != "TL")
+valid_pitches <- subset(valid_pitches,
+                        valid_pitches$pitch_type == "2sf" | valid_pitches$pitch_type == "4sf" | 
+                          valid_pitches$pitch_type == "fc" | valid_pitches$pitch_type == "cb")
+mlm <- lmer(release_speed ~ pitch_number * pitch_type + inning_position + (1|pitcher), data = valid_pitches)
+
+stargazer(mlm, 
+          header=FALSE,
+          title = "Summary Table for Mixed Effect Model",
+          dep.var.labels = "Pitch Velocity",
+          covariate.labels = c("Pitch Number", "Pitch Type: 4-Seam FB", "Pitch Type: Curveball", "Pitch Type: Cutter", "Inning Position: First 3", "Inning Position: Last 3", "Pitch Number:4-Seam FB", "Pitch Number:Curveball", "Pitch Number:Cutter", "Constant"))
+```
+
+Similarly to previous results, the pitch speed still decreases as the game progresses. The beginning of an inning shows a decrease in pitch velocity, while the end indicates an increase. All of these patterns are statistically significant. The interaction term between pitch type and pitch number is used to account for the fact that change in pitch velocity throughout the game changes differently for each pitch type. It is significant for 4-Seam Fastballs and Cutters.
+
+\newpage
+
+##Conclusion
+
+Our initial analysis, in which all pitchers were included and pitch types unaccounted for, indicated a fairly strong decrease in pitching speed, especially during the first part of the game. This trend proved misleading, as aggregating data by all pitchers and all pitch types did not provide much insight on what changes were actually going on. Starting and relief pitchers have very different strategies and purposes in the game, while different pitch types naturally have huge differences in speed.
+
+When partitioning the data to accomodate for these findings, the overall decrease in pitching speed still existed for all pitch types, in a more steady and consistent manner than before. However, these overall decreases did have exceptions. The initial pitches of the game seem to increase in speed, attributed to the pitcher warming up. It was originally a concern that survivorship bias would be a concern for later pitches in the game if the game duration varied significantly among pitchers. However, since relief pitchers were removed, the variance in number of pitches for starting pitchers is low.
+
+However, our thesis failed to explain the increase in speed seen at the end of innings, found in the mixed effects linear model. It was theorized that the opposite would occur. Warming up, even within innings, has significant effects on pitching speed. A possible theory as to why speed increases at the end of the inning is a psychological effect. The pitcher may realize their proximity to a break and are willing to alter their pitching behavior in order to get a rest sooner.
+
+There are a number of factors that our analysis did not include that might limit the generalizability of our conclusions. During this analysis, there were some limitations that we came across. We were unable to account for rest days between games, injuries, and warm-up pitches before each inning. The main limitation, however, was that there was no way to account for how long of a break a pitcher gets in between innings. The length of the break is dependent on how long the other half inning takes, and that is not constant. Therefore, a longer rest could mean less decline in velocity and vice versa. 
+
+\newpage
+
+##Bibliography
+
+Albert, Jim. "Historical Look at Pitcher Usage." *Exploring Baseball Data with R*, 28 Jan. 2019, baseballwithr.wordpress.com/2019/01/28/historical-look-at-pitcher-usage/.
+
+"Baseball Savant: Trending MLB Players, Statcast and Visualizations." *Baseballsavant.com*, baseballsavant.mlb.com/.
+
+"FanGraphs Baseball: Baseball Statistics and Analysis." *FanGraphs Baseball | Baseball Statistics and Analysis*, www.fangraphs.com/.
+
+Foxsports. "The Problem with the 100-Pitch Limit." *FOX Sports*, 9 Apr. 2016, www.foxsports.com/mlb/story/dodgers-no-hitter-scott-stripling-sf-giants-pitch-limit-rookie-100-pitches-reason-why-040916.
+
+"Major League Total Stats " 2019 " Pitchers " Pitch Type Statistics: FanGraphs Baseball." *Major League Total Stats " 2019 " Pitchers " Pitch Type Statistics | FanGraphs Baseball*, www.fangraphs.com/leaders.aspx?pos=all&stats=pit&lg=all&qual=0&type=4&season=2019&month=0&season1=2019&ind=0&team=0%2Css&rost=0&age=0&filter=&players=0&startdate=2019-01-01&enddate=2019-12-31.
+
+"MLB Stats, Scores, History, & Records." *Baseball*, www.baseball-reference.com/.
+
+"Statcast Search CSV Documentation." *Baseballsavant.com*, baseballsavant.mlb.com/csv-docs.
+
+Whiteside, J A, et al. "Elbow Injuries in Young Baseball Players." *The Physician and Sportsmedicine*, U.S. National Library of Medicine, June 1999, www.ncbi.nlm.nih.gov/pubmed/20086726.
+
+##Appendix
+
+####Summary Tables for Pitch Type Regression Models
+```{r}
+summary(lm_2sf)
+summary(lm_4sf)
+summary(lm_cb)
+summary(lm_fc)
+```
+
+
+####Summary Table for Mixed Effect Model
+```{r}
+summary(mlm)
+```
+
+####Diagnostic Plots for Mixed Effect Model
+```{r diagnostics, fig.height= 4}
+#layout(matrix(c(1,2), nrow = 1))
+plot(mlm, xlab="Fitted Values", ylab = "Residuals", main = "Residuals vs Fitted")
+
+qqnorm(resid(mlm))
+qqline(resid(mlm))
+
+```
+
