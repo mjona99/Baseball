@@ -1,0 +1,72 @@
+---
+title: "Willson Framing"
+author: "MicahJona"
+date: "1/27/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(ggplot2)
+```
+
+reading in/cleaning data
+```{r}
+cubsCatchers <- read.csv("Cubs catching.csv")
+cubsCatchers$plate_x <- as.numeric(levels(cubsCatchers$plate_x))[cubsCatchers$plate_x]
+cubsCatchers$plate_z <- as.numeric(levels(cubsCatchers$plate_z))[cubsCatchers$plate_z]
+cubsCatchers$game_date <- as.Date(cubsCatchers$game_date, format = "%Y-%m-%d")
+cubsCatchers_called <- subset(cubsCatchers, description == "ball" | description == "blocked_ball" | description == "called_strike")
+cubsCatchers_called$is_strike <- 1
+for(i in 1:nrow(cubsCatchers_called)) {
+  if(cubsCatchers_called$description[i] == "ball" | cubsCatchers_called$description[i] == "blocked_ball") {
+    cubsCatchers_called$is_strike[i] <- 0
+  }
+  if(cubsCatchers_called$description[i] == "blocked_ball") {
+    cubsCatchers_called$description[i] = "ball"
+  }
+}
+```
+
+```{r}
+willson <- subset(cubsCatchers_called, cubsCatchers_called$player_name == "Willson Contreras")
+
+willson_shadow_and_heart <- subset(willson, (plate_x >= -1.108333 & plate_x <= 1.108333) & 
+                                                (plate_z <= 3.83333 & plate_z >= 1.16667))
+willson_heart <- subset(willson, (plate_x <= 0.558333 & plate_x >= -0.558333) &
+                                    (plate_z <= 3.16667 & plate_z >= 1.83333))
+willson_shadow <- willson_shadow_and_heart[!(willson_shadow_and_heart$sv_id %in% willson_heart$sv_id),]
+
+willson_shadow_info <- subset(willson_shadow, select = c(game_date, is_strike, player_name))
+willson_shadow_info <- willson_shadow_info[order(willson_shadow_info$game_date),]
+count <- 0
+for(i in 1:nrow(willson_shadow_info)) {
+  willson_shadow_info$pitch_num[i] = count + 1
+  count <- count + 1
+  willson_shadow_info$roll_ave[i] <- 0
+}
+
+for(i in 50:nrow(willson_shadow_info)) {
+  before_i <- i - 49
+  num_strikes <- 0
+  for(j in before_i:i) {
+    if(willson_shadow_info$is_strike[j]) {
+      num_strikes <- num_strikes + 1
+    }
+  }
+  willson_shadow_info$roll_ave[i] = num_strikes / 50
+}
+
+willy_plot <- ggplot(data = willson_shadow_info,
+                     mapping = aes(x = willson_shadow_info$pitch_num, y = willson_shadow_info$roll_ave)) + 
+  geom_line() + ylim(.3, .7) + xlim(50, 3000) +
+  geom_hline(yintercept = .484, linetype = "dashed", color = "red", size = 1) + theme_bw() + 
+  labs(x = "Pitch Number",
+       y = "Strike Percentage",
+       caption = "Data from baseballsavant",
+       title = "Willson Contreras’ 2019 50-Pitch Rolling Shadow Zone Strike Called Percentage",
+       subtitle = "Red line: Season average") + 
+  theme(plot.caption = element_text(size = 12))
+willy_plot
+```
+
