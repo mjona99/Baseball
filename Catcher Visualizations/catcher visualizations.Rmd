@@ -1,0 +1,321 @@
+---
+title: "catcher visualizations"
+author: "MicahJona"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(ggplot2)
+```
+
+reading in/cleaning data
+```{r}
+allData <- read.csv("2020-train.csv")
+catcherSubset <- subset(allData, allData$catcher_id == "f06c9fdf")
+catcherSubset$is_strike <- 1
+for(i in 1:nrow(catcherSubset)) {
+  if(catcherSubset$pitch_call[i] == "BallCalled" | catcherSubset$pitch_call[i] == "BallIntentional" |
+     catcherSubset$pitch_call[i] == "HitByPitch") {
+    catcherSubset$is_strike[i] <- 0
+  }
+}
+allCalledPitches <- subset(allData, pitch_call == "BallCalled" | pitch_call == "StrikeCalled")
+allCalledPitches$is_strike <- 1
+catcherCalledPitches <- subset(catcherSubset, pitch_call == "BallCalled" | pitch_call == "StrikeCalled")
+catcherCalledPitches$is_strike <- 1
+for(i in 1:nrow(catcherCalledPitches)) {
+  if(catcherCalledPitches$pitch_call[i] == "BallCalled") {
+    catcherCalledPitches$is_strike[i] <- 0
+  }
+}
+
+for(i in 1:nrow(allCalledPitches)) {
+  if(allCalledPitches$pitch_call[i] == "BallCalled") {
+    allCalledPitches$is_strike[i] <- 0
+  }
+}
+```
+
+Catcher subsets
+```{r}
+#shadow area
+#Plate side -6.7" to -13.3" on the left and 6.7" to 13.3"(-0.558333 to -1.108333) plate_side
+#Plate height is 38" to 46" (3.16667 to 3.83333) on the top and 22" (1.83333) to 14" (1.16667) on the bottom plate_height
+shadow_and_heart <- subset(catcherCalledPitches, (plate_side >= -1.108333 & plate_side <= 1.108333) & 
+                                                (plate_height <= 3.83333 & plate_height >= 1.16667))
+#heart is -6.7 to 6.7 (side) and 22 to 42 (height)
+heart <- subset(catcherCalledPitches, (plate_side <= 0.558333 & plate_side >= -0.558333) &
+                                    (plate_height <= 3.16667 & plate_height >= 1.83333))
+#Creates shadow zone, which is the strike zone (minus the heart) and a couple inches added (3.3 on sides and 4 on up/down)
+shadow <- shadow_and_heart[!(shadow_and_heart$pitch_id %in% heart$pitch_id),]
+
+#strike zone: 18" (1.5) to 42 (3.5)" (plate_height) -10 (-0.833333)" to 10 (0.833333)" (plate_side)
+strike_zone <- subset(catcherCalledPitches, (plate_side >= -0.833333 & plate_side <= 0.833333) & 
+                                          (plate_height >= 1.5 & plate_height <= 3.5))
+```
+
+League subsets
+```{r}
+all_shadow_and_heart <- subset(allCalledPitches, (plate_side >= -1.108333 & plate_side <= 1.108333) & 
+                                                (plate_height <= 3.83333 & plate_height >= 1.16667))
+#heart is -6.7 to 6.7 (side) and 22 to 42 (height)
+all_heart <- subset(allCalledPitches, (plate_side <= 0.558333 & plate_side >= -0.558333) &
+                                    (plate_height <= 3.16667 & plate_height >= 1.83333))
+#Creates shadow zone, which is the strike zone (minus the heart) and a couple inches added (3.3 on sides and 4 on up/down)
+all_shadow <- all_shadow_and_heart[!(all_shadow_and_heart$pitch_id %in% all_heart$pitch_id),]
+```
+
+Catcher buckets
+```{r}
+#Bucket 1 - top left 
+bucket1 <- subset(catcherCalledPitches, (catcherCalledPitches$plate_height >= 3.16667 & 
+                                           catcherCalledPitches$plate_height <= 3.83333) &
+                                      (catcherCalledPitches$plate_side >= -1.108333 & 
+                                         catcherCalledPitches$plate_side <= -.558333))
+bucket1_strike_percentage <- (sum(bucket1$is_strike) / nrow(bucket1)) * 100
+#Bucket 2 - top 
+bucket2 <- subset(catcherCalledPitches, (catcherCalledPitches$plate_height >= 3.16667 & 
+                                           catcherCalledPitches$plate_height <= 3.83333) &
+                                      (catcherCalledPitches$plate_side >= -.558333 & 
+                                         catcherCalledPitches$plate_side <= .558333))
+bucket2_strike_percentage <- (sum(bucket2$is_strike) / nrow(bucket2)) * 100
+#Bucket 3 - top right 
+bucket3 <- subset(catcherCalledPitches, (catcherCalledPitches$plate_height >= 3.16667 & 
+                                           catcherCalledPitches$plate_height <= 3.83333) &
+                                    (catcherCalledPitches$plate_side >= .558333 & 
+                                       catcherCalledPitches$plate_side <= 1.108333))
+bucket3_strike_percentage <- (sum(bucket3$is_strike) / nrow(bucket3)) * 100      
+#Bucket 4 - right
+bucket4 <- subset(catcherCalledPitches, (catcherCalledPitches$plate_height >= 1.83333 & 
+                                           catcherCalledPitches$plate_height <= 3.16667) &
+                                      (catcherCalledPitches$plate_side >= .558333 & 
+                                         catcherCalledPitches$plate_side <= 1.108333))
+bucket4_strike_percentage <- (sum(bucket4$is_strike) / nrow(bucket4)) * 100      
+#Bucket 5 - bottom right 
+bucket5 <- subset(catcherCalledPitches, ((catcherCalledPitches$plate_height >= 1.16667 & 
+                                            catcherCalledPitches$plate_height <= 1.83333) &
+                                      (catcherCalledPitches$plate_side >= .558333 & 
+                                         catcherCalledPitches$plate_side <= 1.108333)))
+bucket5_strike_percentage <- (sum(bucket5$is_strike) / nrow(bucket5)) * 100
+#Bucket 6 - bottom
+bucket6 <- subset(catcherCalledPitches, ((catcherCalledPitches$plate_height >= 1.16667 & 
+                                            catcherCalledPitches$plate_height <= 1.83333) &
+                                       (catcherCalledPitches$plate_side >= -.558333 & 
+                                          catcherCalledPitches$plate_side <= .558333)))
+bucket6_strike_percentage <- (sum(bucket6$is_strike) / nrow(bucket6)) * 100
+#Bucket 7 - bottom left
+bucket7 <- subset(catcherCalledPitches, (catcherCalledPitches$plate_height >= 1.16667 & 
+                                           catcherCalledPitches$plate_height <= 1.83333) &
+                                        (catcherCalledPitches$plate_side >= -1.108333 & 
+                                           catcherCalledPitches$plate_side <= -.558333))
+bucket7_strike_percentage <- (sum(bucket7$is_strike) / nrow(bucket7)) * 100
+#Bucket 8 - left
+bucket8 <- subset(catcherCalledPitches, (catcherCalledPitches$plate_height >= 1.83333 & 
+                                           catcherCalledPitches$plate_height <= 3.16667) &
+                                        (catcherCalledPitches$plate_side >= -1.108333 & 
+                                           catcherCalledPitches$plate_side <= -.558333))
+bucket8_strike_percentage <- (sum(bucket8$is_strike) / nrow(bucket8)) * 100
+```
+
+League buckets
+```{r}
+all_bucket1 <- subset(allCalledPitches, (allCalledPitches$plate_height >= 3.16667 & 
+                                           allCalledPitches$plate_height <= 3.83333) &
+                                      (allCalledPitches$plate_side >= -1.108333 & 
+                                         allCalledPitches$plate_side <= -.558333))
+all_bucket1_strike_percentage <- (sum(all_bucket1$is_strike) / nrow(all_bucket1)) * 100
+#Bucket 2 - top 
+all_bucket2 <- subset(allCalledPitches, (allCalledPitches$plate_height >= 3.16667 & 
+                                           allCalledPitches$plate_height <= 3.83333) &
+                                      (allCalledPitches$plate_side >= -.558333 & 
+                                         allCalledPitches$plate_side <= .558333))
+all_bucket2_strike_percentage <- (sum(all_bucket2$is_strike) / nrow(all_bucket2)) * 100
+#Bucket 3 - top right 
+all_bucket3 <- subset(allCalledPitches, (allCalledPitches$plate_height >= 3.16667 & 
+                                           allCalledPitches$plate_height <= 3.83333) &
+                                    (allCalledPitches$plate_side >= .558333 & 
+                                       allCalledPitches$plate_side <= 1.108333))
+all_bucket3_strike_percentage <- (sum(all_bucket3$is_strike) / nrow(all_bucket3)) * 100      
+#Bucket 4 - right
+all_bucket4 <- subset(allCalledPitches, (allCalledPitches$plate_height >= 1.83333 &
+                                           allCalledPitches$plate_height <= 3.16667) &
+                                      (allCalledPitches$plate_side >= .558333 & 
+                                         allCalledPitches$plate_side <= 1.108333))
+all_bucket4_strike_percentage <- (sum(all_bucket4$is_strike) / nrow(all_bucket4)) * 100      
+#Bucket 5 - bottom right 
+all_bucket5 <- subset(allCalledPitches, ((allCalledPitches$plate_height >= 1.16667 & 
+                                            allCalledPitches$plate_height <= 1.83333) &
+                                      (allCalledPitches$plate_side >= .558333 & 
+                                         allCalledPitches$plate_side <= 1.108333)))
+all_bucket5_strike_percentage <- (sum(all_bucket5$is_strike) / nrow(all_bucket5)) * 100
+#Bucket 6 - bottom
+all_bucket6 <- subset(allCalledPitches, ((allCalledPitches$plate_height >= 1.16667 & 
+                                            allCalledPitches$plate_height <= 1.83333) &
+                                       (allCalledPitches$plate_side >= -.558333 & 
+                                          allCalledPitches$plate_side <= .558333)))
+all_bucket6_strike_percentage <- (sum(all_bucket6$is_strike) / nrow(all_bucket6)) * 100
+#Bucket 7 - bottom left
+all_bucket7 <- subset(allCalledPitches, (allCalledPitches$plate_height >= 1.16667 & 
+                                           allCalledPitches$plate_height <= 1.83333) &
+                                        (allCalledPitches$plate_side >= -1.108333 & 
+                                           allCalledPitches$plate_side <= -.558333))
+all_bucket7_strike_percentage <- (sum(all_bucket7$is_strike) / nrow(all_bucket7)) * 100
+#Bucket 8 - left
+all_bucket8 <- subset(allCalledPitches, (allCalledPitches$plate_height >= 1.83333 & 
+                                           allCalledPitches$plate_height <= 3.16667) &
+                                        (allCalledPitches$plate_side >= -1.108333 & 
+                                           allCalledPitches$plate_side <= -.558333))
+all_bucket8_strike_percentage <- (sum(all_bucket8$is_strike) / nrow(all_bucket8)) * 100
+
+all_heart_strike_percentage <- 100 *  mean(all_heart$is_strike)
+
+allStrikePercentages_dataframe <- data.frame("strike_percentage" = c(all_bucket1_strike_percentage, all_bucket2_strike_percentage, all_bucket3_strike_percentage, all_bucket4_strike_percentage, all_bucket5_strike_percentage, all_bucket6_strike_percentage, all_bucket7_strike_percentage, all_bucket8_strike_percentage, all_heart_strike_percentage))
+```
+
+detailed pitch calls
+```{r}
+shadow$called_type <- ""
+
+strikeCalled <- subset(allCalledPitches, allCalledPitches$pitch_call == "StrikeCalled")
+strikeCalled$is_strike <- 1
+ballCalled <- subset(allCalledPitches, allCalledPitches$pitch_call == "BallCalled")
+ballCalled$is_strike <- 0
+allCalledPitches <- rbind.data.frame(strikeCalled, ballCalled)
+
+for(i in 1:nrow(shadow)) {
+  ##if it's a strike IN the strike zone
+  if(shadow$pitch_call[i] == "StrikeCalled") {
+    if(shadow$pitch_id[i] %in% strike_zone$pitch_id) {
+      shadow$called_type[i] <- "called_strike_in_zone"
+    }
+  }
+  ##if it's a strike OUT of the zone
+  if(shadow$pitch_call[i] == "StrikeCalled") {
+    if(!(shadow$pitch_id[i] %in% strike_zone$pitch_id)) {
+      shadow$called_type[i] <- "called_strike_out_zone"
+    }
+  }
+    ##if it's a ball IN the zone
+  if(shadow$pitch_call[i] == "BallCalled") {
+    if(shadow$pitch_id[i] %in% strike_zone$pitch_id) {
+      shadow$called_type[i] <- "ball_in_zone"
+    }
+  }
+    ##if it's a ball OUT of the zone
+  if(shadow$pitch_call[i] == "BallCalled") {
+    if(!(shadow$pitch_id[i] %in% strike_zone$pitch_id)) {
+      shadow$called_type[i] <- "ball_out_zone"
+    }
+  }
+}
+badFraming <- subset(shadow, shadow$called_type == "ball_in_zone")
+goodFraming <- subset(shadow, shadow$called_type == "called_strike_out_zone")
+good_and_bad_framing <- subset(shadow, shadow$called_type == "ball_in_zone" | shadow$called_type == "called_strike_out_zone")
+```
+
+detailed calls in the shadow zone plot
+```{r}
+#ggplot of detailed calls in the shadow zone.
+shadow_detail_pitch_calls <- ggplot(data = shadow, aes(x = plate_side, y = plate_height)) + 
+  geom_point(aes(col = called_type)) + xlim(-1.5, 1.5) + ylim(1, 4) + 
+  labs(x = "", y = "",
+       title = "Catcher f06c9fdf Detailed Pitch Calls",
+       subtitle = "Black line is rule book defined strike zone",
+       caption = "Data from the Seattle Mariners") + 
+      scale_color_manual(breaks = c("ball_in_zone", "ball_out_zone", "called_strike_in_zone", "called_strike_out_zone"), 
+      values = c("blue", "forestgreen", "red", "purple"), 
+      labels = c("Ball in Zone", "Ball Out of Zone", "Called Strike in Zone", "Called Strike Out of Zone"), 
+      name = "Detailed Pitch Calls") + 
+  annotate("text", x= 0, y = 4, label = "Catcher's Perspective") + 
+  geom_segment(aes(x = -.83333, y = 1.5, xend = .83333, yend = 1.5), color = "black", size = 1) + 
+  geom_segment(aes(x = -.83333, y = 3.5, xend = .83333, yend = 3.5), color = "black", size = 1) + 
+  geom_segment(aes(x = -.83333, y = 1.5, xend = -.83333, yend = 3.5), color = "black", size = 1) + 
+  geom_segment(aes(x = .83333, y = 1.5, xend = .83333, yend = 3.5), color = "black", size = 1) +
+  theme_bw()
+```
+
+good/bad framing plot
+```{r}
+#ggplot of good and bad framing. good framing is called strikes on balls not in the strike zone. bad framing is balls in the strike zone
+goodBadFraming <- ggplot(data = good_and_bad_framing, aes(x = plate_side, y = plate_height)) +  
+  geom_point(aes(col = called_type))  +  xlim(-1.5, 1.5) + ylim(1, 4) + 
+  scale_color_manual(breaks = c("ball_in_zone", "called_strike_out_zone"), values = c("blue", "red"), 
+                     labels = c("Ball in Zone", "Called Strike Out of Zone"), name = "Pitch Call") + 
+  annotate("text", x= 0, y = 4, label = "Catcher's Perspective") + 
+  labs(x = "", y = "",
+  title = "Catcher f06c9fdf's Good and Bad Framing",
+  subtitle = "Black line is rule book defined strike zone",
+  caption = "Data from the Seattle Mariners") +
+  geom_segment(aes(x = -.83333, y = 1.5, xend = .83333, yend = 1.5), color = "black", size = 1) + 
+  geom_segment(aes(x = -.83333, y = 3.5, xend = .83333, yend = 3.5), color = "black", size = 1) + 
+  geom_segment(aes(x = -.83333, y = 1.5, xend = -.83333, yend = 3.5), color = "black", size = 1) + 
+  geom_segment(aes(x = .83333, y = 1.5, xend = .83333, yend = 3.5),color = "black", size = 1) +
+  theme_bw()
+ggsave("good bad framing.png", plot = goodBadFraming, dpi = 700)
+```
+
+calculating bucket differences
+```{r}
+bucket1_difference <- bucket1_strike_percentage - all_bucket1_strike_percentage
+bucket2_difference <- bucket2_strike_percentage - all_bucket2_strike_percentage
+bucket3_difference <- bucket3_strike_percentage - all_bucket3_strike_percentage
+bucket4_difference <- bucket4_strike_percentage - all_bucket4_strike_percentage
+bucket5_difference <- bucket5_strike_percentage - all_bucket5_strike_percentage
+bucket6_difference <- bucket6_strike_percentage - all_bucket6_strike_percentage
+bucket7_difference <- bucket7_strike_percentage - all_bucket7_strike_percentage
+bucket8_difference <- bucket8_strike_percentage - all_bucket8_strike_percentage
+
+differenceStrikePercentages_dataframe <- data.frame("strike_percentage_diff" = c(bucket1_difference, bucket2_difference, bucket3_difference, bucket4_difference, bucket5_difference, bucket6_difference, bucket7_difference, bucket8_difference))
+```
+
+Catcher difference vs league average plot
+```{r}
+difference_strike_percentage <- ggplot(data = shadow, aes(color = differenceStrikePercentages_dataframe)) + 
+  labs(x = "", y = "",
+       title = "Catcher f06c9fdf vs. League Average",
+       subtitle = "f06c9fdf Called Strike Percentage Minus League Average by Zone",
+       caption = "Data from the Seattle Mariners") + 
+  xlim(-1.5, 1.5) + ylim(1, 4) + annotate("text", x= 0, y = 4, label = "Catcher's Perspective") + 
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) + 
+  geom_rect(mapping = aes(xmin = -1.108333, xmax = -.558333, ymin = 3.16667, ymax = 3.83333, fill = bucket1_difference), 
+            color = "black", alpha = .5) +
+  geom_rect(mapping =  aes(xmin = -.558333, xmax = .558333, ymin = 3.16667, ymax = 3.83333, fill = bucket2_difference), 
+            color = "black", alpha = .5) + 
+  geom_rect(mapping =  aes(xmin = .558333, xmax = 1.108333, ymin = 3.16667, ymax = 3.83333, fill = bucket3_difference), 
+            color = "black", alpha = .5) + 
+  geom_rect(mapping =  aes(xmin = .558333, xmax = 1.108333, ymin = 1.83333, ymax = 3.16667, fill = bucket4_difference), 
+            color = "black", alpha = .5) +
+  geom_rect(mapping =  aes(xmin = .558333, xmax = 1.108333, ymin = 1.16667, ymax = 1.83333, fill = bucket5_difference), 
+            color = "black", alpha = .5) + 
+  geom_rect(mapping =  aes(xmin = -.558333, xmax = .558333, ymin = 1.16667, ymax = 1.83333, fill = bucket6_difference), 
+            color = "black", alpha = .5) +
+  geom_rect(mapping =  aes(xmin = -1.108333, xmax = -.558333, ymin = 1.16667, ymax = 1.83333, fill = bucket7_difference), 
+            color = "black", alpha = .5) +
+  geom_rect(mapping =  aes(xmin = -1.108333, xmax = -.558333, ymin = 1.83333, ymax = 3.16667, fill = bucket8_difference), 
+            color = "black", alpha = .5) + 
+  geom_segment(aes(x = -.83333, y = 1.5, xend = .83333, yend = 1.5), color = "green", linetype = "dashed") + 
+  geom_segment(aes(x = -.83333, y = 3.5, xend = .83333, yend = 3.5), color = "green", linetype = "dashed") + 
+  geom_segment(aes(x = -.83333, y = 1.5, xend = -.83333, yend = 3.5), color = "green", linetype = "dashed") + 
+  geom_segment(aes(x = .83333, y = 1.5, xend = .83333, yend = 3.5), color = "green", linetype = "dashed")  +
+  annotate("text", x = -.8333, y =  3.6, label = paste(round(bucket1_difference, digits = 2), "%", sep = ""), 
+           color = "black") + 
+  annotate("text", x = 0, y =  3.6, label = paste(round(bucket2_difference, digits = 2), "%", sep = ""), 
+           color = "black") + 
+  annotate("text", x = .83333, y =  3.6, label = paste(round(bucket3_difference, digits = 2), "%", sep = ""), 
+           color = "black") + 
+  annotate("text", x = .83333, y =  2.5, label = paste(round(bucket4_difference, digits = 2), "%", sep = ""), 
+           color = "black") + 
+  annotate("text", x = .83333, y =  1.4, label = paste(round(bucket5_difference, digits = 2), "%", sep = ""), 
+           color = "black") + 
+  annotate("text", x = 0, y =  1.4, label = paste(round(bucket6_difference, digits = 2), "%", sep = ""), 
+           color = "black") + 
+  annotate("text", x = -.8333, y =  1.4, label = paste(round(bucket7_difference, digits = 2), "%", sep = ""), 
+           color = "black") + 
+  annotate("text", x = -.8333, y =  2.5, label = paste(round(bucket8_difference, digits = 2), "%", sep = ""), 
+           color = "black") + 
+  theme_bw() + 
+  theme(legend.position = "none")
+difference_strike_percentage
+```
+
