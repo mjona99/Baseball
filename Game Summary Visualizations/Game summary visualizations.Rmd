@@ -1,0 +1,78 @@
+---
+title: "Pitch Charts"
+author: "Micah Jona"
+date: "11/1/2019"
+output:
+  html_document: default
+  pdf_document: default
+  always_allow_html: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(plotly)
+library(shiny)
+library(ggplot2)
+library(gganimate)
+library(gapminder)
+library("plot3D")
+library(lattice)
+library(plyr)
+library(tinytex)
+```
+
+```{r}
+#reading in data
+chaseField <- read.csv("ChaseField.csv") 
+#creating data frame of unique pitchers
+pitcherDataFrame <- count(chaseField, vars = "pitcher")
+names(pitcherDataFrame)[2] <- "numPitches"
+#Merging pitcher data frame with chase field 
+chaseField <- merge(x = chaseField, y = pitcherDataFrame, by = "pitcher")
+#Sorting chase field data frame by pitcher, and then in pitch order
+chaseField <- chaseField[order(chaseField$pitcher, chaseField$pitchid),]
+#Figuring out the amount of pitches thrown in the game by each pitcher
+chaseField$pitchOfGame <- 0
+for(i in 2:nrow(chaseField)) {
+  if(chaseField$pitcher[i] == chaseField$pitcher[i-1]) {
+    chaseField$pitchOfGame[i] <- chaseField$pitchOfGame[i-1] + 1
+  }
+}
+chaseField$pitchOfGame <- chaseField$pitchOfGame + 1
+#Creating subset of just one pitcher, for example purposes
+flahertySubset <- subset(chaseField, chaseField$pitcher == "Flaherty, Jack")
+#Correctly reclassifying Flaherty's "Other" pitch as his true Curveball
+for(i in 1:nrow(flahertySubset)) {
+ if(flahertySubset$pitch_type_auto[i] == "Other") {
+    flahertySubset$pitch_type_auto[i] <- revalue(flahertySubset$pitch_type_auto[i], c("Other"="Curveball"))
+ }
+} 
+```
+
+```{r}
+#Create a ggplot from the Jack Flaherty subset. Number of pitches thrown in the game vs. pitch velocity, color coded by pitch type. When you hover over each pitch can get essential information at just a glance: pitch result, opposing batter, inning, PA in the inning, pitch in the PA, spin rate, spin axis, vertical, and horizontal movement.
+g <- ggplot(flahertySubset, aes(x= pitchOfGame, y = rel_speed, col = pitch_type_auto, group = pitch_type_auto, 
+            text = paste0("Pitch Result: ", pitch_call, "\nBatter: ", batter, "\nInning: ", inning, "\nPA (in inning): ", pa_number, "\nPitch in PA: ", pa_pitch_number,   "\nSpin Rate (rpm): ", spin_rate, "\nSpin Axis (degrees): ", spin_axis, "\nInduced Vertical Break (in): ", induced_vert_break, "\nHorizontal Break (in): ", horz_break))) + 
+  geom_point() +
+  geom_line(linetype = 2) +
+  labs(title = "Jack Flaherty Game Pitch Chart", y = "Pitch Velocity (MPH)", x = "Pitches", caption = "Source: New York Mets") +
+  guides(color = guide_legend("Pitch Type"))
+#Making the ggplot interactive
+p <- ggplotly(g) 
+p
+```
+
+
+```{r}
+#Creating a 3D visualization of Flaherty's release point. Release point side (left -> right in relation to the plate), release point extension (how far back (towards second base) vs. how far forward (towards home plate)), and release height (closer to the ground vs closer to the sky). 
+hoverText <- paste0("Release Side (ft): ", flahertySubset$rel_side, "\nExtension (ft): ", flahertySubset$extension, "\nRelease Height (ft): ", flahertySubset$rel_height)
+p <- plot_ly(x=flahertySubset$rel_side, y=flahertySubset$extension, z=flahertySubset$rel_height, type="scatter3d", mode="markers", color=flahertySubset$pitch_type_auto, text = hoverText)  %>%
+  layout(
+    title = "3D Release Point Plot: Jack Flaherty",
+    scene = list(
+      xaxis = list(title = "Release Point Side (ft)"),
+      yaxis = list(title = "Release Extension (ft)"),
+      zaxis = list(title = "Release Point Height (ft)")
+    ))
+p
+```
